@@ -1,4 +1,5 @@
 # monero-node
+
 A script to set up and update a private monero node
 
 The script has been tested on Ubuntu 20.04.
