@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# author: jtok
 # v1.0 - 2022.09.24
 
 # if the script is running as root abort
