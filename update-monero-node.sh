@@ -1,7 +1,165 @@
 #!/bin/bash
 
 # author: jtok
-# v1.0 - 2022.09.24
+# version: v1.0 - 2022.09.24
+# url: https://github.com/JTok/monero-node/tags
+# description: This script will update your monero node to the latest version, or install it if it isn't installed yet
+
+
+
+
+################################################## script variables start ######################################################
+
+#### instructions ####
+## most users will not need to change any variables from the defaults ##
+# you can set the variables below to your liking, or leave them as is, the script will work without any changes
+# if you do make changes, all paths need to be writeable by the user running this script
+# this script will not run as root or sudo, so please run it as a standard user without sudo
+
+#### paranoia modes ####
+## these modes will ignore some of the variables below in oder to allow for more user input ##
+
+# Paranoid mode - use this if you really don't want to trust the script to verify downloaded files for you
+paranoid_mode=false
+
+# Ultra paranoid mode - the same as Paranoid mode, but also requires you to manually download files
+ultra_paranoid_mode=false
+
+
+#### installation options #####
+
+# installation directory
+install_dir="$HOME/monero"
+
+# data directory
+data_dir="$HOME/.bitmonero"
+
+# config file path
+config_file="$data_dir/bitmonero.conf"
+
+
+#### advanced variables ####
+
+## monerod service options ##
+
+# systemd user services directory
+# DO NOT CHANGE THIS UNLESS YOU KNOW WHAT YOU ARE DOING
+systemd_user_services_dir="$HOME/.config/systemd/user"
+
+# monero service name
+monero_service_name="monerod.service"
+
+# monero service file path
+monero_service_file="$systemd_user_services_dir/$monero_service_name"
+
+# pid file path
+pid_file="$data_dir/bitmonero.pid"
+
+
+## config file options ##
+# rpc settings#
+
+# rpc bind ip - leave default to bind to all interfaces
+rpc_bind_ip="0.0.0.0"
+
+# rpc bind port
+rpc_bind_port="18081"
+
+#### danger zone ####
+## don't change these unless you know what you're doing ##
+## changing these could break the script or make the installation not work correctly ##
+
+# current version directory name
+current_version_dir_name="current"
+
+# current version directory path
+current_version_dir="$install_dir/$current_version_dir_name"
+
+# previous version directory name
+previous_version_dir_name="previous"
+
+# previous version directory path
+previous_version_dir="$install_dir/$previous_version_dir_name"
+
+# monero node options
+monero_node_options="--config-file=$config_file --detach --pidfile $pid_file"
+
+# monero node binary path
+monero_node_binary="$install_dir/monerod"
+
+# monero node binary url
+monero_download_file_name="linux64"
+
+# downloaded monero file compressed
+monero_download_file_compressed=true
+
+
+## config file options ##
+
+# log settings #
+# monero daemon log file path
+monero_daemon_log_file="/var/log/monero/monerod.log"
+
+# monero daemon max log file size
+# leave as 0 to prevent monerod from managing the log files and instead let logrotate take care of it
+monero_daemon_max_log_file_size=0
+
+# p2p settings #
+# p2p bind ip - leave default to bind to all interfaces
+p2p_bind_ip="0.0.0.0"
+
+# p2p bind port
+p2p_bind_port="18080"
+
+# hide my port - leave default to prevent nodes from spreading your IP to other nodes
+hide_my_port=1
+
+# rpc settings #
+# confirm external bind - leave default to allow external connections to use unsafe RPC calls
+confirm_external_bind=1
+
+# restricted rpc - leave default to prevent unsafe RPC calls
+restricted_rpc=1
+
+# no-igd - leave default to keep UPnP port mapping disabled
+no_igd=1
+
+# db settings #
+# db safe sync mode - if enabled db writes will be slower, but more reliable
+db_safe_sync_mode=false
+
+# monero pulse settings #
+# enforce dns checkpointing - emergency checkpoints set by MoneroPulse operators will be enforced to workaround potential consensus bugs
+# Check https://monerodocs.org/infrastructure/monero-pulse/ for explanation and trade-offs
+enforce_dns_checkpointing=1
+
+# peer settings #
+# out peers - This will enable much faster sync and tx awareness; the default 8 is suboptimal nowadays
+out_peers=64
+
+# in peers - The default is unlimited; we prefer to put a cap on this
+in_peers=1024
+
+# rate settings #
+# limit rate up - 10240 kB/s == 10MB/s; a raise from default 2048 kB/s; contribute more to p2p network
+limit_rate_up=10240
+
+# limit rate down - 1048576 kB/s == 1GB/s; a raise from default 8192 kB/s; allow for faster initial sync
+limit_rate_down=1048576
+
+# daemon login settings #
+# WARNING: setting a username and password in the script will introduce security risks
+# if these are not filled in, the script will prompt you for them when it is run
+#rpc username to use for the monero service
+username=""
+# rpc password to use for monero service
+password=""
+
+
+################################################## script variables end #########################################################
+
+
+###################################################### script start #############################################################
 
 # if the script is running as root abort
 if [[ $EUID -eq 0 ]]; then
@@ -11,11 +169,11 @@ fi
 
 
 # check if the monero service already exists.
-echo "checking if the monerod service already exists"
-if systemctl --user list-units --full -all | grep -Fq "monerod.service"; then
-  echo "the monerod service already exists, so no need to recreate it"
+echo "checking if $monero_service_name already exists"
+if systemctl --user list-units --full -all | grep -Fq "$monero_service_name"; then
+  echo "$monero_service_name already exists, so no need to recreate it"
 else
-  echo "the monerod service does not exist, so creating it now"
+  echo "$monero_service_name does not exist, so creating it now"
 
   # enable linger so that the service will start at boot before the user logs in
   echo "enabling lingering for current user so that the service will start at boot"
@@ -23,139 +181,161 @@ else
 
   # create the user service directory
   echo "creating directory for user services"
-  mkdir -p "$HOME/.config/systemd/user"
+  mkdir -p "$systemd_user_services_dir"
 
   # create the service file
-  echo "creating monerod.service file"
+  echo "creating $monero_service_name file"
   echo "[Unit]
-Description=monerod
+Description=monerod service running as $monero_service_name
 After=network.target
 
 [Service]
 Type=forking
-PIDFile=$HOME/.bitmonero/monerod.pid
-ExecStart=$HOME/monero/current/monerod --config-file=$HOME/.bitmonero/bitmonero.conf --detach --pidfile $HOME/.bitmonero/monerod.pid
+PIDFile=$pid_file
+ExecStart=$current_version_dir/monerod $monero_node_options
 
 [Install]
 WantedBy=default.target
-" > "$HOME/.config/systemd/user/monerod.service"
+" > "$monero_service_file"
 
   # enable the service and reload the daemons so systemd will see it
   echo "enabling the service and reloading daemons"
-  systemctl --user enable monerod.service
+  systemctl --user enable "$monero_service_name"
   systemctl --user daemon-reload
 
   # check to make sure the service was created successfully before continuing
-  echo "checking if the service installed successfully"
-  if systemctl --user list-units --full -all | grep -Fq "monerod.service"; then
-    echo "service installed successfully. continuing..."
+  echo "checking if $monero_service_name installed successfully"
+  if systemctl --user list-units --full -all | grep -Fq "$monero_service_name"; then
+    echo "$monero_service_name installed successfully. continuing..."
   else
-    echo "the service failed to install. aborting script"
+    echo "$monero_service_name failed to install. aborting script"
     exit
   fi
 
 fi
 
 
-# check if bitmonero.conf already exists
-echo "checking if the bitmonero.conf file already exists"
-if [[ -f "$HOME/.bitmonero/bitmonero.conf" ]]; then
-  echo "bitmonero.conf exists. so no need to recreate it"
+# check if config file already exists
+echo "checking if $config_file already exists"
+if [[ -f "$config_file" ]]; then
+  echo "$config_file exists. so no need to recreate it"
 else
-  echo "bitmonero.conf does not exist. creating file."
+  echo "$config_file does not exist. creating file."
 
-  # create the .bitmonero directory
-  echo "creating the bitmonero directory"
-  mkdir -p "$HOME/.bitmonero"
+  # create the data directory
+  echo "creating the data directory"
+  mkdir -p "$data_dir"
 
-  # ask user for credentials to use when connecting to the monerod service from their wallet
-  printf "\n\nPlease choose a username and password to use to connect to the monerod service when using a wallet\n"
-  while :
-  do
-    read -r -p 'username: ' username
+  # check if the username and password variables are set already
+  if [[ -z "$username" ]] || [[ -z "$password" ]]; then
+    # ask user for credentials to use when connecting to the monerod service from their wallet
+    printf "\n\nPlease choose a username and password to use to connect to the monerod service when using a wallet\n"
+    while :
+    do
+      read -r -p 'username: ' username
 
-    if [ -n "$username" ]; then
-      break;
-    fi
+      if [ -n "$username" ]; then
+        break;
+      fi
 
-    if [ -z "$username" ]; then
-      printf "\nerror: username cannot be blank. please try again\n\n" >&2
-    else
-      printf "\nerror: something went wrong, but I can't tell what. please try again\n\n" >&2
-    fi
-  done
-  while :
-  do
-    read -r -sp 'password: ' password
-    echo ""
-    read -r -sp 'verify password: ' verify
+      if [ -z "$username" ]; then
+        printf "\nerror: username cannot be blank. please try again\n\n" >&2
+      else
+        printf "\nerror: something went wrong, but I can't tell what. please try again\n\n" >&2
+      fi
+    done
+    while :
+    do
+      read -r -sp 'password: ' password
+      echo ""
+      read -r -sp 'verify password: ' verify
 
-    if [ "$password" == "$verify" ] && [ -n "$password" ]; then
-      printf "\npasswords matched\n"
-      break;
-    fi
+      if [ "$password" == "$verify" ] && [ -n "$password" ]; then
+        printf "\npasswords matched\n"
+        break;
+      fi
 
-    if [ -z "$password" ]; then
-      printf "\nerror: password cannot be blank. please try again\n\n" >&2
-    elif [ "$password" != "$verify" ]; then
-      printf "\nerror: passwords did not match. please try again\n\n" >&2
-    else
-      printf "\nerror: something went wrong, but I can't tell what. please try again\n\n" >&2
-    fi
-  done
+      if [ -z "$password" ]; then
+        printf "\nerror: password cannot be blank. please try again\n\n" >&2
+      elif [ "$password" != "$verify" ]; then
+        printf "\nerror: passwords did not match. please try again\n\n" >&2
+      else
+        printf "\nerror: something went wrong, but I can't tell what. please try again\n\n" >&2
+      fi
+    done
 
-  echo "Thank you. bitmonero.conf will be generated with an rpc-login user the username: $username"
+    echo "Thank you. $config_file will have an rpc login username of: $username"
+  fi
 
-  # write the bitmonero.conf file
-  echo "creating the bitmonero.conf file"
-  echo "# $HOME/.bitmonero/bitmonero.conf
+  # write the config file
+  echo "creating $config_file"
+  echo "# $config_file
 
 # Data directory (blockchain db and indices)
-data-dir=$HOME/.bitmonero
+data-dir=$data_dir
 
 # Log file
-log-file=/var/log/monero/monerod.log
-max-log-file-size=0            # Prevent monerod from managing the log files; we want logrotate to take care of that
+log-file=$monero_daemon_log_file
+max-log-file-size=$monero_daemon_max_log_file_size            # Prevent monerod from managing the log files; we want logrotate to take care of that
 
 # P2P full node
-#p2p-bind-ip=0.0.0.0            # Bind to all interfaces (the default)
-#p2p-bind-port=18080            # Bind to default port
-hide-my-port=1                  # prevents nodes from spreading your IP to other nodes
+#p2p-bind-ip=$p2p_bind_ip             # Bind to all interfaces (the default)
+#p2p-bind-port=$p2p_bind_port             # Bind to default port
+hide-my-port=$hide_my_port                  # prevents nodes from spreading your IP to other nodes
 
 # RPC open node
-rpc-bind-ip=0.0.0.0            # Bind to all interfaces
-rpc-bind-port=18081            # Bind on default port
-confirm-external-bind=1        # Open node (confirm)
-restricted-rpc=1               # Prevent unsafe RPC calls
-no-igd=1                       # Disable UPnP port mapping
+rpc-bind-ip=$rpc_bind_ip             # Bind to all interfaces
+rpc-bind-port=$rpc_bind_port             # Bind on default port
+confirm-external-bind=$confirm_external_bind         # Open node (confirm)
+restricted-rpc=$restricted_rpc                # Prevent unsafe RPC calls
+no-igd=$no_igd                        # Disable UPnP port mapping
 
 # Slow but reliable db writes
 #db-sync-mode=safe
 
 # Emergency checkpoints set by MoneroPulse operators will be enforced to workaround potential consensus bugs
 # Check https://monerodocs.org/infrastructure/monero-pulse/ for explanation and trade-offs
-enforce-dns-checkpointing=1
+enforce-dns-checkpointing=$enforce_dns_checkpointing
 
-out-peers=64              # This will enable much faster sync and tx awareness; the default 8 is suboptimal nowadays
-in-peers=1024             # The default is unlimited; we prefer to put a cap on this
+out-peers=$out_peers              # This will enable much faster sync and tx awareness; the default 8 is suboptimal nowadays
+in-peers=$in_peers             # The default is unlimited; we prefer to put a cap on this
 
-#limit-rate-up=1048576     # 1048576 kB/s == 1GB/s; a raise from default 2048 kB/s; contribute more to p2p network
-limit-rate-down=1048576   # 1048576 kB/s == 1GB/s; a raise from default 8192 kB/s; allow for faster initial sync
+limit-rate-up=$limit_rate_up        # 10240 kB/s == 10MB/s; a raise from default 2048 kB/s; contribute more to p2p network
+limit-rate-down=$limit_rate_down   # 1048576 kB/s == 1GB/s; a raise from default 8192 kB/s; allow for faster initial sync
 
 # Set login for daemon
 rpc-login=$username:$password
-" > "$HOME/.bitmonero/bitmonero.conf"
+" > "$config_file"
 
-  echo "To edit the service configuration you can edit $HOME/.bitmonero/bitmonero.conf"
-  echo "IMPORTANT: the service will not be publically accessible and is running on port 18081"
+# check variables to see if they are using the default or not. if not, then add them to the config file
+# uncomment p2p bind ip if it is not the default
+if [[ "$p2p_bind_ip" != "0.0.0.0" ]]; then
+  sed -i '/#p2p-bind-ip=$p2p_bind_ip/s/^#//g' "$config_file"
+fi
+
+# uncomment p2p bind port if it is not the default
+if [[ "$p2p_bind_port" != "18080" ]]; then
+  sed -i '/#p2p-bind-port=$p2p_bind_port/s/^#//g' "$config_file"
+fi
+
+# uncomment db sync mode if it is not the default
+if [[ "$db_safe_sync_mode" != false ]]; then
+  sed -i '/#db-sync-mode=safe/s/^#//g' "$config_file"
+fi
+
+# get the system's local IP address
+ip_address=$(hostname -I | awk '{print $1}')
+
+  echo "To edit the service configuration you can edit $config_file"
+  echo "IMPORTANT: the rpc service is running on $ip_address:$rpc_bind_port"
   read -r -p "Note the port above and press any key to continue ..."
 
-  # check if bitmonero.conf was successfully created
-  echo "checking if the bitmonero.conf was created successfully"
-  if [[ -f "$HOME/.bitmonero/bitmonero.conf" ]]; then
-    echo "bitmonero.conf successfully created. continuing..."
+  # check if config file was successfully created
+  echo "checking if $config_file was created successfully"
+  if [[ -f "$config_file" ]]; then
+    echo "$config_file successfully created. continuing..."
   else
-    echo "bitmonero.conf was not successfully created. aborting script"
+    echo "$config_file was not successfully created. aborting script"
     exit
   fi
 fi
@@ -166,7 +346,7 @@ fi
 cd "$HOME" || exit
 
 # check to see if their is a current version of monero installed
-if [ -d "$HOME/monero/current/" ]; then
+if [ -d "$current_version_dir/" ]; then
   current_version_installed=true
 else
   current_version_installed=false
@@ -175,7 +355,7 @@ fi
 
 # if there is a current version, store the currently running version in a variable so it can be compared to the downloaded version later
 if [ "$current_version_installed" == true ]; then
-  current_full_version=$(find "$HOME/monero/" -type f -name "*.current")
+  current_full_version=$(find "$install_dir/" -type f -name "*.current")
   # strip the full path and store just the basename
   current_full_version=$(basename "$current_full_version")
   # strip the file extension and store just the version
@@ -374,16 +554,16 @@ fi
 
 ## extract the new monero version ##
 # create a directory to extract the new monero version to if it doesn't already exist
-mkdir -p "$HOME/monero/"
+mkdir -p "$install_dir/"
 # extract the new monero version that was downloaded to the monero directory
 echo "extracting the new monero version that was downloaded"
-tar -xvf "$HOME/linux64" -C "$HOME/monero/"
+tar -xvf "$HOME/linux64" -C "$install_dir/"
 
 
 ## verify that the current version doesn't match the version number of the extracted download ##
 # loop through all the directories and store whatever the last one is in a variable
 # (there should only be one directory, so no need to store them as an array and search the array)
-for d in "$HOME"/monero/*; do
+for d in "$install_dir"/*; do
   # check to see if the current object in $d is a directory
   if [ -d "$d" ]; then
     # if it is a directory store just the basename, not the full path, in a variable
@@ -411,7 +591,7 @@ if [ "$current_version_installed" == true ]; then
           echo "cleaning up and exiting script"
           # remove downloaded files - compressed file, extracted file, signing key, and hash file
           rm -fv "$HOME/linux64"
-          rm -rfv "$HOME/monero/$download_full_version"
+          rm -rfv "${install_dir:?}/$download_full_version"
           rm -fv "$HOME/binaryfate.asc"
           rm -fv "$HOME/hashes.txt"
           exit
@@ -436,7 +616,7 @@ if [ "$current_version_installed" == true ]; then
           echo "cleaning up and exiting script"
           # remove downloaded files - compressed file, extracted file, signing key, and hash file
           rm -fv "$HOME/linux64"
-          rm -rfv "$HOME/monero/$download_full_version"
+          rm -rfv "${install_dir:?}/$download_full_version"
           rm -fv "$HOME/binaryfate.asc"
           rm -fv "$HOME/hashes.txt"
           exit
@@ -480,7 +660,7 @@ else
         echo "cleaning up and exiting script"
         # remove downloaded files - compressed file, extracted file, signing key, and hash file
         rm -fv "$HOME/linux64"
-        rm -rfv "$HOME/monero/$download_full_version"
+        rm -rfv "${install_dir:?}/$download_full_version"
         rm -fv "$HOME/binaryfate.asc"
         rm -fv "$HOME/hashes.txt"
         exit
@@ -509,7 +689,7 @@ else
         echo "cleaning up and exiting script"
         # remove downloaded files - compressed file, extracted file, signing key, and hash file
         rm -fv "$HOME/linux64"
-        rm -rfv "$HOME/monero/$download_full_version"
+        rm -rfv "${install_dir:?}/$download_full_version"
         rm -fv "$HOME/binaryfate.asc"
         rm -fv "$HOME/hashes.txt"
         exit
@@ -524,8 +704,8 @@ fi
 
 ## finalize the installation ##
 # stop the monerod node service
-echo "stopping monerod.service"
-systemctl --user stop monerod.service
+echo "stopping $monero_service_name"
+systemctl --user stop "$monero_service_name"
 
 # wait for service to fully stop
 echo "waiting 30 seconds for the service to fully stop"
@@ -539,21 +719,21 @@ done
 # rename the current node version from "current" to "previous" and move the *.current version file if a current version is installed
 if [ "$current_version_installed" == true ]; then
   echo "renaming the current version in case something goes wrong"
-  mv -fv "$HOME/monero/current" "$HOME/monero/previous"
-  mv -fv "$HOME/monero/"*.current "$HOME/monero/previous/"
+  mv -fv "$current_version_dir" "$previous_version_dir"
+  mv -fv "$install_dir/"*.current "$previous_version_dir/"
 fi
 
 # create current version file using the name of the downloaded version number
 echo "creating current version file"
-touch "$HOME/monero/$download_full_version.current"
+touch "$install_dir/$download_full_version.current"
 
 # rename extracted folder to current
 echo "renaming the extracted folder from $download_full_version to current"
-mv -fv "$HOME/monero/$download_full_version" "$HOME/monero/current"
+mv -fv "$install_dir/$download_full_version" "$current_version_dir"
 
 # start node service
-echo "starting the monerod service"
-systemctl --user start monerod.service
+echo "starting $monero_service_name"
+systemctl --user start "$monero_service_name"
 
 # wait for service to fully start
 echo "waiting 30 seconds for the service to fully start"
@@ -565,13 +745,13 @@ while [ $secs -gt 0 ]; do
 done
 
 # check the status of the service
-echo "checking the status of the monerod service"
-if systemctl --user is-active --quiet monerod.service; then
+echo "checking the status of $monero_service_name"
+if systemctl --user is-active --quiet "$monero_service_name"; then
   # if the service is running, continue
-  echo "the service is running. calling this a success. continuing..."
+  echo "$monero_service_name is running. calling this a success. continuing..."
 else
   # if the service is not running, ask if the user wants to manually verify the service
-  printf "the service appears not to be running\n"
+  printf "%s appears not to be running\n" "$monero_service_name"
   while true; do
     read -r -p "Do you want to verify the service manually? " yn
     case $yn in
@@ -594,7 +774,7 @@ else
   done
 
   # show the current status
-  systemctl --user status monerod.service
+  systemctl --user status "$monero_service_name"
 
   # ask the user to confirm if the service is running
   while true; do
@@ -614,8 +794,8 @@ else
                 printf "rolling back changes\n"
 
                 # make sure the service is actually stopped
-                echo "making sure monerod.service is stopped"
-                systemctl --user stop monerod.service
+                echo "making sure $monero_service_name is stopped"
+                systemctl --user stop "$monero_service_name"
 
                 # wait for service to fully stop
                 echo "waiting 30 seconds for the service to fully stop"
@@ -628,17 +808,17 @@ else
 
                 # remove the new version
                 echo "removing the newly downloaded version"
-                rm -fv "$HOME/monero/"*.current
-                rm -fv -r "$HOME/monero/current/"
+                rm -fv "$install_dir/"*.current
+                rm -fv -r "$current_version_dir"
 
                 # put the previous version back
                 echo "restoring the previous version"
-                mv -fv "$HOME/monero/previous/"*.current "$HOME/monero/"
-                mv -fv "$HOME/monero/previous" "$HOME/monero/current"
+                mv -fv "$previous_version_dir/"*.current "$install_dir/"
+                mv -fv "$previous_version_dir" "$current_version_dir"
 
                 # start node service
-                echo "starting the previous monerod service"
-                systemctl --user start monerod.service
+                echo "starting the previous service, $monero_service_name"
+                systemctl --user start "$monero_service_name"
 
                 # wait for service to fully start
                 echo "waiting 30 seconds for the service to fully start"
@@ -650,8 +830,8 @@ else
                 done
 
                 # check the status of the service
-                echo "checking the status of the previous monerod service"
-                if systemctl --user is-active --quiet monerod.service; then
+                echo "checking the status of the previous service, $monero_service_name"
+                if systemctl --user is-active --quiet "$monero_service_name"; then
                   # if the service is running, continue
                   echo "the service is running. calling this a success. continuing..."
                 else
@@ -679,7 +859,7 @@ else
                   done
 
                   # show the current status
-                  systemctl --user status monerod.service
+                  systemctl --user status "$monero_service_name"
 
                   # ask the user to confirm if the service is running
                   while true; do
@@ -742,9 +922,11 @@ rm -fv "$HOME/binaryfate.asc"
 rm -fv "$HOME/hashes.txt"
 
 # remove previous version
-if [ -d "$HOME/monero/previous" ]; then
+if [ -d "$previous_version_dir" ]; then
   echo "removing the previous version"
-  rm -fv -r "$HOME/monero/previous"
+  rm -fv -r "$previous_version_dir"
 fi
 
 echo "installation complete"
+
+######################################################### script end ###########################################################
