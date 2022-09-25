@@ -6,6 +6,9 @@
 # description: This script will update your monero node to the latest version, or install it if it isn't installed yet
 
 
+#### DISCLAIMER ####
+# Use at your own risk. This is a work-in-progress and provided as is.
+# I have tested this on my own server, as best as I am able, but YMMV.
 
 
 ################################################## script variables start ######################################################
