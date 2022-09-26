@@ -11,7 +11,7 @@
 # I have tested this on my own server, as best as I am able, but YMMV.
 
 
-################################################## script variables start ######################################################
+###################################################### variables start ######################################################
 
 #### instructions ####
 ## most users will not need to change any variables from the defaults ##
@@ -90,8 +90,11 @@ previous_version_dir="$install_dir/$previous_version_dir_name"
 # monero node options
 monero_node_options="--config-file=$config_file --detach --pidfile $pid_file"
 
+# monero node binary name
+monero_node_binary_name="monerod"
+
 # monero node binary path
-monero_node_binary="$current_version_dir/monerod"
+monero_node_binary="$current_version_dir/$monero_node_binary_name"
 
 ## download options ##
 # monero node download url
@@ -192,10 +195,137 @@ gpg:          There is no indication that the signature belongs to the owner.
 Primary key fingerprint: 81AC 591F E9C4 B65C 5806  AFC3 F0AF 4D46 2A0B DF92'
 
 
-################################################## script variables end #########################################################
+###################################################### variables end ######################################################
 
 
-###################################################### script start #############################################################
+##################################################### fucntions start #####################################################
+
+# function to clean up
+function cleanup() {
+  # set local variables
+  local is_rollback_=$1
+  local extracted_download_dir_=$2
+
+  # check if is_rollback_ is empty, if so set it to false
+  if [ -z "$is_rollback_" ]; then
+    is_rollback_=false
+  fi
+
+  # perform rollback tasks if is_rollback_ is true
+  if [ "$is_rollback_" = true ]; then
+    # make sure the service is actually stopped
+    echo "making absolutely sure $monero_service_name is stopped"
+    systemctl --user stop "$monero_service_name"
+
+    # wait for service to fully stop
+    echo "waiting 30 seconds for the service to fully stop"
+    secs=30
+    while [ $secs -gt 0 ]; do
+      echo -ne "$secs\033[0K\r"
+      sleep 1
+      : $((secs--))
+    done
+
+    # remove new current version file if it exists
+    for f in "$install_dir"/*.current; do
+      if [ -f "$f" ]; then
+        echo "Removing new current version file $f"
+        rm -rfv "$f"
+      fi
+    done
+    # remove new current version directory if it exists
+    if [ -d "$current_version_dir" ]; then
+      echo "Removing new current version directory"
+      rm -rfv "$current_version_dir"
+    fi
+
+    # put the previous version back if it exists
+    if [ -d "$previous_version_dir" ]; then
+      echo "Putting previous version file back"
+      mv -fv "$previous_version_dir/"*.current "$install_dir/"
+      echo "Putting previous version directory back"
+      mv -fv "$previous_version_dir" "$current_version_dir"
+    fi
+  fi
+
+  # remove binaryfate signing key if it exists
+  if [ -f "$binaryfate_download_file" ]; then
+    echo "removing $binaryfate_download_file_name file"
+    rm -fv "$binaryfate_download_file"
+  fi
+
+  # remove hashes.txt if it exists
+  if [ -f "$hashes_txt_file" ]; then
+    echo "removing $hashes_txt_file_name file"
+    rm -fv "$hashes_txt_file"
+  fi
+
+  # remove downloaded monero file if it exists
+  if [ -f "$monero_download_file" ]; then
+    echo "removing $monero_download_file_name file"
+    rm -fv "$monero_download_file"
+  fi
+
+  # remove extracted monero directory if it exists and the variable has been passed
+  if [ -n "$extracted_download_dir_" ] && [ -d "$download_dir/$extracted_download_dir_" ]; then
+    echo "removing $extracted_download_dir_ directory"
+    rm -rfv "${download_dir:?}/$extracted_download_dir_"
+  fi
+
+  # remove download directory and its contents if it is in /tmp and if it exists
+  # we don't want to remove this directory if it is not in /tmp because it may contain other files
+  if [ -d "$download_dir" ] && [[ "$download_dir/" = "/tmp/"* ]]; then
+    echo "removing $download_dir directory"
+    rm -rfv "$download_dir"
+  fi
+
+  # remove previous version directory if it exists
+  if [ -d "$previous_version_dir" ]; then
+    echo "removing $previous_version_dir directory"
+    rm -rfv "$previous_version_dir"
+  fi
+}
+
+# function to see if the user would like to continue or abort
+function continue_or_abort() {
+  # set local variables
+  local is_rollback_=$1
+  local extracted_download_dir_=$2
+
+  # check if is_rollback_ is empty, if so set it to false
+  if [ -z "$is_rollback_" ]; then
+    is_rollback_=false
+  fi
+
+  while true; do
+    read -r -p "Choose C to continue anyway, or A to abort " ca
+    case $ca in
+      [Cc]* )
+        printf "continuing...\n"
+        break
+        ;;
+      [Aa]* )
+        echo "cleaning up and aborting script"
+        # run cleanup function
+        if [ -z "$extracted_download_dir_" ]; then
+          cleanup "$is_rollback_"
+        else
+          cleanup "$is_rollback_" "$extracted_download_dir_"
+        fi
+        exit 1
+        ;;
+      * )
+        echo "You must choose C to continue anyway, or A to abort"
+        ;;
+    esac
+  done
+}
+
+
+###################################################### fucntions end ######################################################
+
+
+###################################################### script start ######################################################
 
 
 ## pre-script checks ##
@@ -226,26 +356,28 @@ if [[ ! -w "$data_dir" ]]; then
   exit 1
 fi
 
-# check if the download directory exists and create it if it doesn't
+# check if the download directory exists and create it if it doesn't; if it does, remove all contents
 if [ ! -d "$download_dir/" ]; then
   echo "creating download directory"
   mkdir -p "$download_dir"
+else
+  echo "download directory already exists, ensuring it is empty"
+  # check to see if the download directory contains any other directories or files
+  if [ "$(ls -A $download_dir)" ]; then
+    echo "download directory is not empty, verifying that it is in /tmp"
+    # check to see if the download directory is in /tmp
+    if [ -d "$download_dir" ] && [[ "$download_dir/" = "/tmp/"* ]]; then
+      echo "download directory is in /tmp, it is save to remove all contents"
+      rm -rfv "${download_dir:?}"/*
+    else
+      echo "download directory is not in /tmp and contains files. it is unsafe to delete them, aborting script"
+      exit 1
+    fi
+  fi
 fi
-# check if the download directory was successfully created and change it to the home directory if it wasn't
-if [ ! -d "$download_dir/" ]; then
-  echo "download directory could not be created, trying home directory instead"
-  download_dir="$HOME"
-fi
-
 # verify that the download directory is writable
 if [ ! -w "$download_dir/" ]; then
-  echo "download directory is not writable, trying home directory instead"
-  download_dir="$HOME"
-fi
-
-# verify that the home directory is writable
-if [ ! -w "$HOME/" ]; then
-  echo "home directory is not writable, aborting script"
+  echo "download directory is not writable, aborting script"
   exit 1
 fi
 
@@ -455,24 +587,8 @@ if [[ "$expected_key" == "$downloaded_key" ]]; then
 else
   # if the keys do not match, ask if the keys should be compared manually
   printf "the downloaded key did not match the expected key\n"
-  while true; do
-    read -r -p "Do you want to compare the keys manually? " yn
-    case $yn in
-      [Yy]* )
-        printf "continuing...\n"
-        break
-        ;;
-      [Nn]* )
-        echo "cleaning up and exiting script"
-        # remove downloaded files
-        rm -fv "$HOME/binaryfate.asc"
-        exit
-        ;;
-      * )
-        echo "Please answer yes or no."
-        ;;
-    esac
-  done
+  printf "please choose continue to compare the keys manually or abort to clean up and exit the script\n"
+  continue_or_abort
 
   # show what the expected signing key is
   printf "the fingerprint should look like this:\n"
@@ -491,10 +607,9 @@ else
         break
         ;;
       [Nn]* )
-        echo "cleaning up and exiting script"
-        # remove downloaded files
-        rm -fv "$HOME/binaryfate.asc"
-        exit
+        # ask the user if they would like to continue or abort
+        continue_or_abort
+        break
         ;;
       * )
         echo "Please answer yes or no."
@@ -523,25 +638,8 @@ if [[ "$expected_hashes_signature" == "$downloaded_hashes_signature" ]]; then
 else
   # if the signatures do not match, ask if the signatures should be compared manually
   printf "the downloaded signature did not match the expected signature\n"
-  while true; do
-    read -r -p "Do you want to compare the signatures manually? " yn
-    case $yn in
-      [Yy]* )
-        printf "continuing...\n"
-        break
-        ;;
-      [Nn]* )
-        echo "cleaning up and exiting script"
-        # remove downloaded files
-        rm -fv "$HOME/binaryfate.asc"
-        rm -fv "$HOME/hashes.txt"
-        exit
-        ;;
-      * )
-        echo "Please answer yes or no."
-        ;;
-    esac
-  done
+  printf "please choose continue to compare the signatures manually or abort to clean up and exit the script\n"
+  continue_or_abort
 
   # show what the expected hashes.txt signature is
   printf "you should see the following lines if it is authentic:\n"
@@ -560,11 +658,9 @@ else
         break
         ;;
       [Nn]* )
-        echo "cleaning up and exiting script"
-        # remove downloaded files
-        rm -fv "$HOME/binaryfate.asc"
-        rm -fv "$HOME/hashes.txt"
-        exit
+        # ask the user if they would like to continue or abort
+        continue_or_abort
+        break
         ;;
       * )
         echo "Please answer yes or no."
@@ -581,7 +677,7 @@ echo "downloading the latest monero version"
 wget -O "$monero_download_file" "$monero_node_download_url"
 
 # store the sha for the new monero version that was downloaded in a variable
-monero_download_shasum="$(shasum -a 256 $monero_download_file | awk '{print $1}')"
+monero_download_shasum=$(shasum -a 256 "$monero_download_file" | awk '{print $1}')
 
 # check that the hash for the new monero that was downloaded is in hashes.txt
 printf "checking %s for the hash of the new monero file that was downloaded\n" "$hashes_txt_file_name"
@@ -599,11 +695,11 @@ if grep -Fq "$monero_download_shasum" "$hashes_txt_file"; then
   hash_full_version="${hash_full_version%%.tar.bz2*}"
 else
   # if the hash is not found let the user know and exit the script
-  echo "the hash for the new monero version that was downloaded was not found. cleaning files and aborting script"
-  # remove downloaded files - compressed file, signing key, and hash file
-  rm -fv "$HOME/linux64"
-  rm -fv "$HOME/binaryfate.asc"
-  rm -fv "$HOME/hashes.txt"
+  printf "the hash for the new monero version that was downloaded was not found. this is so unsafe that the script will not continue\n"
+  printf "if you know what you are doing you can enable the bypass for this check, but you could lose everything if you do!\n"
+  printf "cleaning files and aborting script\n"
+  # run cleanup function
+  cleanup
   exit
 fi
 
@@ -614,11 +710,7 @@ fi
 if [ "$monero_download_file_compressed" = true ]; then
   # extract the new monero version that was downloaded to the monero directory
   echo "extracting the new monero version that was downloaded"
-  tar -xvf "$monero_download_file" -C "$install_dir/"
-else
-  # if the file is not expected to be compressed, move it
-  echo "moving the new monero version"
-  mv "$monero_download_file" "$install_dir/"
+  tar -xvf "$monero_download_file" -C "$download_dir/"
 fi
 
 
@@ -626,13 +718,31 @@ fi
 
 # loop through all the directories and store whatever the last one is in a variable
 # (there should only be one directory, so no need to store them as an array and search the array)
-for d in "$install_dir"/*; do
+for d in "$download_dir"/*; do
   # check to see if the current object in $d is a directory
   if [ -d "$d" ]; then
     # if it is a directory store just the basename, not the full path, in a variable
     download_full_version=$(basename "$d")
   fi
 done
+
+# check to make sure the download_full_version variable is not empty
+if [ -z "$download_full_version" ]; then
+  # if it is empty, let the user know and exit the script
+  echo "could not find a directory with the monero files. unrecoverable error. cleaning files and aborting script"
+  # run cleanup function
+  cleanup
+  exit
+fi
+
+# check to make sure the monerod binary exists
+if [ ! -f "$download_dir/$download_full_version/$monero_node_binary_name" ]; then
+  # if it doesn't exist, let the user know and exit the script
+  echo "could not find the monerod binary. unrecoverable error. cleaning files and aborting script"
+  # run cleanup function
+  cleanup false "$download_full_version"
+  exit
+fi
 
 # compare the current version number to the downloaded version number if a current version exists
 if [ "$current_version_installed" == true ]; then
@@ -658,13 +768,9 @@ if [ "$current_version_installed" == true ]; then
           break
           ;;
         [Nn]* )
-          echo "cleaning up and exiting script"
-          # remove downloaded files - compressed file, extracted file, signing key, and hash file
-          rm -fv "$HOME/linux64"
-          rm -rfv "${install_dir:?}/$download_full_version"
-          rm -fv "$HOME/binaryfate.asc"
-          rm -fv "$HOME/hashes.txt"
-          exit
+          # ask the user if they would like to continue or abort
+          continue_or_abort false "$download_full_version"
+          break
           ;;
         * )
           echo "Please answer yes or no."
@@ -683,12 +789,9 @@ if [ "$current_version_installed" == true ]; then
       read -r -p "Do the above versions match? " yn
       case $yn in
         [Yy]* )
-          echo "cleaning up and exiting script"
-          # remove downloaded files - compressed file, extracted file, signing key, and hash file
-          rm -fv "$HOME/linux64"
-          rm -rfv "${install_dir:?}/$download_full_version"
-          rm -fv "$HOME/binaryfate.asc"
-          rm -fv "$HOME/hashes.txt"
+          echo "cleaning up and aborting script"
+          # run cleanup function
+          cleanup false "$download_full_version"
           exit
           ;;
         [Nn]* )
@@ -728,13 +831,9 @@ else
         break
         ;;
       [Nn]* )
-        echo "cleaning up and exiting script"
-        # remove downloaded files - compressed file, extracted file, signing key, and hash file
-        rm -fv "$HOME/linux64"
-        rm -rfv "${install_dir:?}/$download_full_version"
-        rm -fv "$HOME/binaryfate.asc"
-        rm -fv "$HOME/hashes.txt"
-        exit
+        # ask the user if they would like to continue or abort
+        continue_or_abort false "$download_full_version"
+        break
         ;;
       * )
         echo "Please answer yes or no."
@@ -757,13 +856,9 @@ else
         break
         ;;
       [Nn]* )
-        echo "cleaning up and exiting script"
-        # remove downloaded files - compressed file, extracted file, signing key, and hash file
-        rm -fv "$HOME/linux64"
-        rm -rfv "${install_dir:?}/$download_full_version"
-        rm -fv "$HOME/binaryfate.asc"
-        rm -fv "$HOME/hashes.txt"
-        exit
+        # ask the user if they would like to continue or abort
+        continue_or_abort false "$download_full_version"
+        break
         ;;
       * )
         echo "Please answer yes or no."
@@ -799,9 +894,9 @@ fi
 echo "creating current version file"
 touch "$install_dir/$download_full_version.current"
 
-# rename extracted folder to current
-echo "renaming the extracted folder from $download_full_version to current"
-mv -fv "$install_dir/$download_full_version" "$current_version_dir"
+# move extracted directory to current directory
+echo "renaming the extracted directory from $download_full_version to current"
+mv -fv "$download_dir/$download_full_version" "$current_version_dir"
 
 # start node service
 echo "starting $monero_service_name"
@@ -832,12 +927,9 @@ else
         break
         ;;
       [Nn]* )
-        echo "cleaning up and exiting script"
-        # remove downloaded files - compressed file, extracted file, signing key, and hash file
-        rm -fv "$HOME/linux64"
-        rm -fv "$HOME/binaryfate.asc"
-        rm -fv "$HOME/hashes.txt"
-        exit
+        # ask the user if they would like to continue or abort
+        continue_or_abort
+        break
         ;;
       * )
         echo "Please answer yes or no."
@@ -859,34 +951,13 @@ else
       [Nn]* )
         if [ "$current_version_installed" == true ]; then
           while true; do
-            read -r -p "Would you like to roll back the changes?? " yn
+            read -r -p "Would you like to roll back to the previously installed version? " yn
             case $yn in
               [Yy]* )
                 ## rollback changes ##
-                printf "rolling back changes\n"
-
-                # make sure the service is actually stopped
-                echo "making sure $monero_service_name is stopped"
-                systemctl --user stop "$monero_service_name"
-
-                # wait for service to fully stop
-                echo "waiting 30 seconds for the service to fully stop"
-                secs=30
-                while [ $secs -gt 0 ]; do
-                  echo -ne "$secs\033[0K\r"
-                  sleep 1
-                  : $((secs--))
-                done
-
-                # remove the new version
-                echo "removing the newly downloaded version"
-                rm -fv "$install_dir/"*.current
-                rm -fv -r "$current_version_dir"
-
-                # put the previous version back
-                echo "restoring the previous version"
-                mv -fv "$previous_version_dir/"*.current "$install_dir/"
-                mv -fv "$previous_version_dir" "$current_version_dir"
+                printf "rolling back to the previous version and cleaning up\n"
+                # run cleanup function
+                cleanup true
 
                 # start node service
                 echo "starting the previous service, $monero_service_name"
@@ -917,12 +988,9 @@ else
                         break
                         ;;
                       [Nn]* )
-                        echo "cleaning up and exiting script"
-                        # remove downloaded files - compressed file, extracted file, signing key, and hash file
-                        rm -fv "$HOME/linux64"
-                        rm -fv "$HOME/binaryfate.asc"
-                        rm -fv "$HOME/hashes.txt"
-                        exit
+                        # ask the user if they would like to continue or abort
+                        continue_or_abort
+                        break
                         ;;
                       * )
                         echo "Please answer yes or no."
@@ -942,12 +1010,9 @@ else
                         break
                         ;;
                       [Nn]* )
-                        echo "you've got major problems that I don't know how to fix. cleaning up and exiting script"
-                        # remove downloaded files - compressed file, extracted file, signing key, and hash file
-                        rm -fv "$HOME/linux64"
-                        rm -fv "$HOME/binaryfate.asc"
-                        rm -fv "$HOME/hashes.txt"
-                        exit
+                        # ask the user if they would like to continue or abort
+                        continue_or_abort
+                        break
                         ;;
                       * )
                         echo "Please answer yes or no."
@@ -955,10 +1020,8 @@ else
                     esac
                   done
                 fi
-                # remove downloaded files - compressed file, extracted file, signing key, and hash file
-                rm -fv "$HOME/linux64"
-                rm -fv "$HOME/binaryfate.asc"
-                rm -fv "$HOME/hashes.txt"
+                # verifying everything is cleaned up before aborting script by running cleanup function
+                cleanup
                 exit
                 ;;
               [Nn]* )
@@ -971,12 +1034,9 @@ else
             esac
           done
         fi
-        echo "cleaning up and exiting script"
-        # remove downloaded files - compressed file, extracted file, signing key, and hash file
-        rm -fv "$HOME/linux64"
-        rm -fv "$HOME/binaryfate.asc"
-        rm -fv "$HOME/hashes.txt"
-        exit
+        # ask the user if they would like to continue or abort
+        continue_or_abort
+        break
         ;;
       * )
         echo "Please answer yes or no."
@@ -989,17 +1049,11 @@ fi
 ## clean up ##
 
 # remove downloaded files - compressed file, signing key, and hash file
-echo "removing files that are no longer needed"
-rm -fv "$HOME/linux64"
-rm -fv "$HOME/binaryfate.asc"
-rm -fv "$HOME/hashes.txt"
-
-# remove previous version
-if [ -d "$previous_version_dir" ]; then
-  echo "removing the previous version"
-  rm -fv -r "$previous_version_dir"
-fi
+echo "cleaning up leftover files"
+# run cleanup function
+cleanup
 
 echo "installation complete"
+echo "if this is a new node, or you have pointed the data into a new directory, it could take several hours to several days to fully sync"
 
-######################################################### script end ###########################################################
+###################################################### script end ######################################################
