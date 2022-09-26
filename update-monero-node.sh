@@ -18,6 +18,7 @@
 # you can set the variables below to your liking, or leave them as is, the script will work without any changes
 # if you do make changes, all paths need to be writeable by the user running this script
 # this script will not run as root or sudo, so please run it as a standard user without sudo
+# be very careful when changing the variables below, as you can break the script or create a security risk
 
 
 #### paranoia modes ####
