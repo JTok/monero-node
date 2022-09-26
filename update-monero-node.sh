@@ -202,19 +202,62 @@ Primary key fingerprint: 81AC 591F E9C4 B65C 5806  AFC3 F0AF 4D46 2A0B DF92'
 
 # check if the script is running as root and exit if it is
 if [[ $EUID -eq 0 ]]; then
-  echo "This script cannot be run as root or with sudo"
+  echo "This script cannot be run as root or with sudo. Please re-run it as your regular user."
   exit 1
 fi
 
-# check if the download folder exists and create it if it doesn't
+# check if the install directory exists and create it if it doesn't
+if [[ ! -d "$install_dir" ]]; then
+  mkdir -p "$install_dir"
+fi
+# verify that the install directory is writable and exit if it isn't
+if [[ ! -w "$install_dir" ]]; then
+  echo "The install directory is not writable. aborting script"
+  exit 1
+fi
+
+# check if the data directory exists and create it if it doesn't
+if [[ ! -d "$data_dir" ]]; then
+  mkdir -p "$data_dir"
+fi
+# verify that the data directory is writable and exit if it isn't
+if [[ ! -w "$data_dir" ]]; then
+  echo "The data directory is not writable. aborting script"
+  exit 1
+fi
+
+# check if the download directory exists and create it if it doesn't
 if [ ! -d "$download_dir/" ]; then
   echo "creating download directory"
   mkdir -p "$download_dir"
 fi
-# check if the download folder was successfully created and change it to the home directory if it wasn't
+# check if the download directory was successfully created and change it to the home directory if it wasn't
 if [ ! -d "$download_dir/" ]; then
-  echo "download directory could not be created, using home directory instead"
+  echo "download directory could not be created, trying home directory instead"
   download_dir="$HOME"
+fi
+
+# verify that the download directory is writable
+if [ ! -w "$download_dir/" ]; then
+  echo "download directory is not writable, trying home directory instead"
+  download_dir="$HOME"
+fi
+
+# verify that the home directory is writable
+if [ ! -w "$HOME/" ]; then
+  echo "home directory is not writable, aborting script"
+  exit 1
+fi
+
+# check if the systemd user services directory exists and create it if it doesn't
+if [ ! -d "$systemd_user_services_dir/" ]; then
+  echo "creating systemd user services directory"
+  mkdir -p "$systemd_user_services_dir"
+fi
+# verify that the systemd user services directory is writable
+if [ ! -w "$systemd_user_services_dir/" ]; then
+  echo "systemd user services directory is not writable, aborting script"
+  exit 1
 fi
 
 # check to see if their is a current version of monero installed
@@ -237,10 +280,6 @@ else
   # enable linger so that the service will start at boot before the user logs in
   echo "enabling lingering for current user so that the service will start at boot"
   loginctl enable-linger "$USER"
-
-  # create the user service directory
-  echo "creating directory for user services"
-  mkdir -p "$systemd_user_services_dir"
 
   # create the service file
   echo "creating $monero_service_name file"
@@ -268,7 +307,7 @@ WantedBy=default.target
     echo "$monero_service_name installed successfully. continuing..."
   else
     echo "$monero_service_name failed to install. aborting script"
-    exit
+    exit 1
   fi
 
 fi
@@ -282,10 +321,6 @@ if [[ -f "$config_file" ]]; then
   echo "$config_file exists. so no need to recreate it"
 else
   echo "$config_file does not exist. creating file."
-
-  # create the data directory
-  echo "creating the data directory"
-  mkdir -p "$data_dir"
 
   # check if the username and password variables are set already
   if [[ -z "$username" ]] || [[ -z "$password" ]]; then
@@ -397,7 +432,7 @@ ip_address=$(hostname -I | awk '{print $1}')
     echo "$config_file successfully created. continuing..."
   else
     echo "$config_file was not successfully created. aborting script"
-    exit
+    exit 1
   fi
 fi
 
@@ -574,9 +609,6 @@ fi
 
 
 ## extract the new monero version ##
-
-# create a directory to extract the new monero version to if it doesn't already exist
-mkdir -p "$install_dir/"
 
 # check to see if the file is expected to be compressed
 if [ "$monero_download_file_compressed" = true ]; then
