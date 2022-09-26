@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # author: jtok
-# version: v1.0 - 2022.09.24
+# version: v1.1.0 - 2022.09.25
 # url: https://github.com/JTok/monero-node/tags
 # description: This script will update your monero node to the latest version, or install it if it isn't installed yet
 
 
 #### DISCLAIMER ####
 # Use at your own risk. This is a work-in-progress and provided as is.
-# I have tested this on my own server, as best as I am able, but YMMV.
+# I have tested this as best as I am able, but YMMV.
 
 
 ###################################################### variables start ######################################################
