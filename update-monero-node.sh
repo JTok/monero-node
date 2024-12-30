@@ -704,44 +704,17 @@ else
   exit
 fi
 
-
-## extract the new monero version ##
-
-# check to see if the file is expected to be compressed
-if [ "$monero_download_file_compressed" = true ]; then
-  # extract the new monero version that was downloaded to the monero directory
-  echo "extracting the new monero version that was downloaded"
-  tar -xvf "$monero_download_file" -C "$download_dir/"
-fi
-
-
 ## verify that the current version doesn't match the version number of the extracted download ##
 
-# loop through all the directories and store whatever the last one is in a variable
-# (there should only be one directory, so no need to store them as an array and search the array)
-for d in "$download_dir"/*; do
-  # check to see if the current object in $d is a directory
-  if [ -d "$d" ]; then
-    # if it is a directory store just the basename, not the full path, in a variable
-    download_full_version=$(basename "$d")
-  fi
-done
+# get the version number from the top level directory in the archive
+download_full_version=$(tar -tf "$monero_download_file" | grep '/$' | head -n1 | sed 's#/$##')
 
 # check to make sure the download_full_version variable is not empty
 if [ -z "$download_full_version" ]; then
   # if it is empty, let the user know and exit the script
-  echo "could not find a directory with the monero files. unrecoverable error. cleaning files and aborting script"
+  echo "could not determine the downloaded version. unrecoverable error. cleaning files and aborting script"
   # run cleanup function
   cleanup
-  exit
-fi
-
-# check to make sure the monerod binary exists
-if [ ! -f "$download_dir/$download_full_version/$monero_node_binary_name" ]; then
-  # if it doesn't exist, let the user know and exit the script
-  echo "could not find the monerod binary. unrecoverable error. cleaning files and aborting script"
-  # run cleanup function
-  cleanup false "$download_full_version"
   exit
 fi
 
@@ -807,6 +780,23 @@ if [ "$current_version_installed" == true ]; then
   fi
 fi
 
+## extract the new monero version ##
+
+# check to see if the file is expected to be compressed
+if [ "$monero_download_file_compressed" = true ]; then
+  # extract the new monero version that was downloaded to the monero directory
+  echo "extracting the new monero version that was downloaded"
+  tar -xvf "$monero_download_file" -C "$download_dir/"
+fi
+
+# check to make sure the monerod binary exists
+if [ ! -f "$download_dir/$download_full_version/$monero_node_binary_name" ]; then
+  # if it doesn't exist, let the user know and exit the script
+  echo "could not find the monerod binary. unrecoverable error. cleaning files and aborting script"
+  # run cleanup function
+  cleanup false "$download_full_version"
+  exit
+fi
 
 ## verify that the version from the hashes.txt file matches the version number of the extracted download ##
 
