@@ -15,3 +15,6 @@
   - logs everything to a file?
   - pauses after each step and waits for input
 - allow some script variables to be set using arguments
+- announce previous version number during script; be sure to compare to new version number as well
+- give option to update OS; with reboot and resume?
+- give option to reboot at end
